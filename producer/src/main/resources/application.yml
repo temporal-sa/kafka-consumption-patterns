@@ -1,0 +1,35 @@
+server:
+  port: 8080
+
+spring:
+  application:
+    name: producer
+  kafka:
+    bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS:localhost:9092}
+
+app:
+  producer:
+    topic: orders.completed
+    # The throughput ceiling shared by all three consumption patterns. Raise this — not the
+    # number of consumers — when you need more parallelism. See PRD section 7.4.
+    partitions: 6
+    replication-factor: 1
+    seed: 20260812
+    # Unset by default: each run namespaces its order IDs with a fresh start-time token, so a
+    # restart never replays IDs that consumers would (correctly) deduplicate into doing nothing.
+    # Set this together with `seed` to replay a run exactly — e.g. to produce deliberate cross-run
+    # duplicates, or to reproduce a load test.
+    # order-id-prefix: fixed-run-1
+    duplicate-rate: 0.0
+    malformed-rate: 0.0
+    default-rate-per-second: 10
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,prometheus,metrics
+
+logging:
+  level:
+    io.temporal.samples.kafka: INFO

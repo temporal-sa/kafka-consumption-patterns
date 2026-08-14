@@ -1,0 +1,35 @@
+server:
+  port: 8082
+
+spring:
+  application:
+    name: consumer-external
+  kafka:
+    bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS:localhost:9092}
+
+  temporal:
+    connection:
+      target: ${TEMPORAL_TARGET:local}
+    namespace: ${TEMPORAL_NAMESPACE:default}
+    # No workers here on purpose: this app is a Temporal client. order-email-worker executes
+    # the workflows it starts.
+
+app:
+  consumer:
+    topic: orders.completed
+    dlt-topic: orders.completed.DLT
+    # Own consumer group, so this pattern sees every event independently of the other two.
+    group-id: temporal-external-app
+    # Listener threads per instance. Combined with instance count, capped by partition count.
+    concurrency: 3
+    max-start-attempts: 10
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,prometheus,metrics
+
+logging:
+  level:
+    io.temporal.samples.kafka: INFO

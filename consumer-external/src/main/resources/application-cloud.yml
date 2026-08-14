@@ -1,0 +1,31 @@
+# Temporal Cloud + secured Kafka template (PRD section 8.3).
+#
+# Activate with:  --spring.profiles.active=cloud
+#
+# Declarative only — no code path differs between local and cloud, so this profile cannot drift
+# behaviourally from what the test suite covers locally (PRD NG8). Supply credentials through
+# environment variables; never commit them.
+
+spring:
+  kafka:
+    bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS}
+    properties:
+      security.protocol: SASL_SSL
+      sasl.mechanism: PLAIN
+      sasl.jaas.config: >
+        org.apache.kafka.common.security.plain.PlainLoginModule required
+        username="${KAFKA_API_KEY}"
+        password="${KAFKA_API_SECRET}";
+
+  temporal:
+    namespace: ${TEMPORAL_NAMESPACE}          # e.g. my-namespace.a1b2c
+    connection:
+      target: ${TEMPORAL_TARGET}              # e.g. my-namespace.a1b2c.tmprl.cloud:7233
+
+      # --- Option A: API key -------------------------------------------------
+      apiKey: ${TEMPORAL_API_KEY:}
+
+      # --- Option B: mTLS ----------------------------------------------------
+      # mtls:
+      #   key-file: ${TEMPORAL_TLS_KEY}
+      #   cert-chain-file: ${TEMPORAL_TLS_CERT}

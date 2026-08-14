@@ -1,0 +1,51 @@
+server:
+  port: 8083
+
+spring:
+  application:
+    name: consumer-workflow
+  kafka:
+    bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS:localhost:9092}
+
+  temporal:
+    connection:
+      target: ${TEMPORAL_TARGET:local}
+    namespace: ${TEMPORAL_NAMESPACE:default}
+    workers:
+      # ONE worker, on ONE instance-scoped task queue, hosting BOTH the consumer workflow and its
+      # activities. That co-location is what guarantees every activity reaches the worker-local
+      # KafkaConsumer handle — a KafkaConsumer cannot be workflow state, so it lives in this JVM.
+      #
+      # Do NOT run a second process with the same instance-id. Both would poll this queue, and
+      # activities could land on the JVM that does not hold the consumer. Scale out by starting
+      # another instance with a different instance-id, which gets its own queue and its own worker.
+      - task-queue: kafka-consumer-${app.consumer.instance-id}
+        workflow-classes:
+          - io.temporal.samples.kafka.consumer.workflow.workflow.KafkaConsumerWorkflowImpl
+        activity-beans:
+          - kafkaConsumerActivities
+
+app:
+  consumer:
+    # Identifies this instance: task queue, workflow ID, and consumer handle key all derive from it.
+    instance-id: ${CONSUMER_INSTANCE_ID:1}
+    topic: orders.completed
+    dlt-topic: orders.completed.DLT
+    # Own consumer group, so this pattern sees every event independently of the other two.
+    group-id: temporal-workflow-consumer
+    # An empty poll still costs one Action, so this also sets the idle cost of the pattern.
+    poll-timeout-ms: 5000
+    # Pinned to 1 so the loop costs exactly 3 Actions per message, matching the reference
+    # architecture's published cost table. Changing it invalidates that table — see
+    # ConsumerWorkflowProperties.DEFAULT_BATCH_SIZE.
+    batch-size: 1
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,prometheus,metrics
+
+logging:
+  level:
+    io.temporal.samples.kafka: INFO

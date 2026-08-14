@@ -1,0 +1,20 @@
+target/
+*.log
+
+.idea/
+*.iml
+.vscode/
+.settings/
+.classpath
+.project
+
+.DS_Store
+
+# Never commit cloud credentials; application-cloud.yml uses env-var placeholders only.
+*.pem
+*.key
+*.crt
+.env
+
+# Load-test output — results are environment-specific and shouldn't be committed
+results/

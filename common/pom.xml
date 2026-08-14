@@ -1,0 +1,57 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+  <modelVersion>4.0.0</modelVersion>
+
+  <parent>
+    <groupId>io.temporal.samples</groupId>
+    <artifactId>kafka-consumption</artifactId>
+    <version>1.0.0-SNAPSHOT</version>
+  </parent>
+
+  <artifactId>common</artifactId>
+  <name>common</name>
+  <description>Shared model, target workflow contract, and cross-module conventions</description>
+
+  <!--
+    No spring-boot-maven-plugin here: this module is a plain library, not an
+    executable app. It also deliberately does NOT depend on the Temporal Spring
+    Boot starter — only on temporal-sdk — so that modules which merely need the
+    model (e.g. producer) don't get Temporal auto-configuration switched on.
+  -->
+
+  <dependencies>
+    <dependency>
+      <groupId>io.temporal</groupId>
+      <artifactId>temporal-sdk</artifactId>
+    </dependency>
+    <dependency>
+      <groupId>com.fasterxml.jackson.core</groupId>
+      <artifactId>jackson-databind</artifactId>
+    </dependency>
+    <dependency>
+      <groupId>com.fasterxml.jackson.datatype</groupId>
+      <artifactId>jackson-datatype-jsr310</artifactId>
+    </dependency>
+    <!--
+      micrometer-core only (not the Spring Boot actuator starter): the shared workflow starter
+      records the same metrics for all three patterns, so they stay comparable. This module still
+      pulls in no Spring.
+    -->
+    <dependency>
+      <groupId>io.micrometer</groupId>
+      <artifactId>micrometer-core</artifactId>
+    </dependency>
+    <!--
+      Plain kafka-clients (not spring-kafka): patterns 2 and 3 drive poll/commit explicitly from
+      inside activities, so they need the raw consumer. Sharing the decode and dead-letter helpers
+      here is what keeps poison-message behaviour identical across all three patterns (FR-X4).
+    -->
+    <dependency>
+      <groupId>org.apache.kafka</groupId>
+      <artifactId>kafka-clients</artifactId>
+    </dependency>
+  </dependencies>
+
+</project>

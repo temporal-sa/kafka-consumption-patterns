@@ -1,0 +1,50 @@
+server:
+  port: 8081
+
+spring:
+  application:
+    name: order-email-worker
+
+  temporal:
+    connection:
+      # "local" targets a `temporal server start-dev` instance on 127.0.0.1:7233
+      target: ${TEMPORAL_TARGET:local}
+    namespace: ${TEMPORAL_NAMESPACE:default}
+    workers-auto-discovery:
+      # Picks up @WorkflowImpl / @ActivityImpl and creates a worker per referenced task queue.
+      packages: io.temporal.samples.kafka.worker
+
+# Failure injection for the simulated downstream services. All off by default;
+# flip them at runtime through the /chaos endpoints (see ChaosController).
+app:
+  chaos:
+    services:
+      orderDb:
+        down: false
+        failure-rate: 0.0
+        latency-ms: 0
+      shippingDb:
+        down: false
+        failure-rate: 0.0
+        latency-ms: 0
+      invoice:
+        down: false
+        failure-rate: 0.0
+        latency-ms: 250
+      email:
+        down: false
+        failure-rate: 0.0
+        latency-ms: 0
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,prometheus,metrics
+  endpoint:
+    health:
+      show-details: always
+
+logging:
+  level:
+    io.temporal.samples.kafka: INFO

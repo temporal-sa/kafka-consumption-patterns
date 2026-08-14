@@ -1,0 +1,19 @@
+<configuration>
+  <appender name="STDOUT" class="ch.qos.logback.core.ConsoleAppender">
+    <encoder>
+      <pattern>%d{HH:mm:ss.SSS} %-5level %logger{36} -- %msg%n</pattern>
+    </encoder>
+  </appender>
+
+  <!-- The SDK's poller/worker lifecycle logging drowns out test output. -->
+  <logger name="io.temporal.internal" level="WARN"/>
+  <logger name="io.temporal.serviceclient" level="WARN"/>
+  <logger name="io.temporal.worker" level="WARN"/>
+  <logger name="io.temporal.testserver" level="WARN"/>
+
+  <logger name="io.temporal.samples.kafka" level="INFO"/>
+
+  <root level="INFO">
+    <appender-ref ref="STDOUT"/>
+  </root>
+</configuration>

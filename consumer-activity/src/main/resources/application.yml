@@ -1,0 +1,54 @@
+server:
+  port: 8084
+
+spring:
+  application:
+    name: consumer-activity
+  kafka:
+    bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS:localhost:9092}
+
+  temporal:
+    connection:
+      target: ${TEMPORAL_TARGET:local}
+    namespace: ${TEMPORAL_NAMESPACE:default}
+    workers-auto-discovery:
+      packages: io.temporal.samples.kafka.consumer.activity
+    workers:
+      - task-queue: kafka-consumer-activity
+        capacity:
+          # THE TRAP THIS PATTERN SETS FOR YOU.
+          #
+          # A long-running activity never finishes, so it never releases its execution slot. With
+          # the SDK default the consumers would occupy slots permanently and every other activity
+          # on this worker would queue forever — a worker that looks healthy and does nothing.
+          #
+          # Keep this comfortably above app.consumer.parallel-consumers. The headroom is what any
+          # other activity on this queue runs in.
+          max-concurrent-activity-executors: 20
+          # Pollers must also outnumber the permanently-occupied slots, or there is nobody left to
+          # pick up new activity tasks.
+          max-concurrent-activity-task-pollers: 10
+
+app:
+  consumer:
+    instance-id: ${CONSUMER_INSTANCE_ID:1}
+    topic: orders.completed
+    dlt-topic: orders.completed.DLT
+    # Own consumer group, so this pattern sees every event independently of the other two.
+    group-id: temporal-activity-consumer
+    poll-timeout-ms: 5000
+    max-records-per-poll: 50
+    # Each is one Kafka consumer in the group. Raising this past the topic's partition count
+    # produces idle consumers, not throughput — the same ceiling every pattern here shares.
+    # Must stay well below capacity.max-concurrent-activity-executors above.
+    parallel-consumers: 2
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,prometheus,metrics
+
+logging:
+  level:
+    io.temporal.samples.kafka: INFO
