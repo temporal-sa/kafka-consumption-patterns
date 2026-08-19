@@ -1,12 +1,16 @@
 # Temporal Cloud connection template (PRD section 8.3).
 #
-# Activate with:  --spring.profiles.active=cloud
+# Activate with:  --spring.profiles.active=cloud                 (API key)
+#            or:  --spring.profiles.active=cloud,cloud-mtls      (mTLS)
 #
 # Deliberately declarative only — no code paths differ between local and cloud, so this profile
 # cannot drift behaviorally from what CI tests locally (PRD NG8). Supply credentials through
 # environment variables; never commit them.
 #
-# Use ONE of the two auth mechanisms below.
+# Pick ONE auth mechanism. The API key below is the default; the mTLS document at the bottom of this
+# file replaces it and only applies when the cloud-mtls profile is active too. Both are live
+# configuration — neither is commented out, because a commented-out credential block is how you end
+# up talking plaintext to a TLS-only endpoint and reading "connection reset" as a network problem.
 
 spring:
   temporal:
@@ -14,10 +18,41 @@ spring:
     connection:
       target: ${TEMPORAL_ADDRESS}               # e.g. my-namespace.a1b2c.tmprl.cloud:7233
 
-      # --- Option A: API key -------------------------------------------------
-      apiKey: ${TEMPORAL_API_KEY:}
+      # TLS on unconditionally, whichever mechanism is in use. Without this, an unset TEMPORAL_API_KEY
+      # resolves to empty, the SDK sees no credential of any kind, and the channel silently falls back
+      # to plaintext. Forcing it on turns a forgotten credential into an auth error at the first call
+      # instead of a connection reset. An mTLS SSL context takes precedence over this when set.
+      # Self-hosted Temporal without TLS: override with SPRING_TEMPORAL_CONNECTION_ENABLE_HTTPS=false.
+      enable-https: true
 
-      # --- Option B: mTLS ----------------------------------------------------
-      # mtls:
-      #   key-file: ${TEMPORAL_TLS_CLIENT_KEY_PATH}
-      #   cert-chain-file: ${TEMPORAL_TLS_CLIENT_CERT_PATH}
+      # --- Option A: API key -------------------------------------------------
+      # Empty when TEMPORAL_API_KEY is unset, which the SDK treats as "no API key". A non-empty value
+      # also enables TLS on its own.
+      api-key: ${TEMPORAL_API_KEY:}
+
+---
+# --- Option B: mTLS ---------------------------------------------------------
+#
+# Adds a client certificate to the connection above. Activate BOTH profiles:
+#
+#   export SPRING_PROFILES_ACTIVE=cloud,cloud-mtls
+#
+# Leave TEMPORAL_API_KEY unset when using this: a non-empty API key would add an auth header on top
+# of the certificate. The placeholders below carry no defaults on purpose — an unset variable reaches
+# the SDK as a literal and fails at startup with `NoSuchFileException: ${TEMPORAL_TLS_CLIENT_KEY_PATH}`,
+# naming the variable you forgot, rather than degrading to a connection you cannot use.
+#
+# The key must be PKCS8 (`-----BEGIN PRIVATE KEY-----`). Convert a PKCS1 key
+# (`-----BEGIN RSA PRIVATE KEY-----`) with:  openssl pkcs8 -topk8 -nocrypt -in old.key -out new.key
+# For a .p12/.pfx bundle, set `pkcs: 12` and give `key-file` alone.
+spring:
+  config:
+    activate:
+      on-profile: cloud-mtls
+  temporal:
+    connection:
+      mtls:
+        key-file: ${TEMPORAL_TLS_CLIENT_KEY_PATH}
+        cert-chain-file: ${TEMPORAL_TLS_CLIENT_CERT_PATH}
+        # pkcs: 12
+        # key-password: ${TEMPORAL_TLS_CLIENT_KEY_PASSWORD:}

@@ -120,6 +120,10 @@ times, once per pattern, producing three workflow executions with distinguishabl
 (`order-email-ext-…`, `order-email-wf-…`, `order-email-act-…`). That side-by-side run is the point of
 the repo.
 
+To run this against Temporal Cloud instead of the dev server, step 2 goes away and steps 4 through 6
+each gain a profile and a set of credentials. See [Temporal Cloud](#temporal-cloud) — all four of
+those processes need them, not just the worker.
+
 | Service | URL |
 | :- | :- |
 | Temporal Web UI | http://localhost:8233 |
@@ -369,14 +373,95 @@ you want worked examples.
 
 ### Temporal Cloud
 
-Both apps ship an `application-cloud.yml` template:
+**Four of the five apps hold a Temporal connection, and every one of them needs the same credentials.**
+The producer is the only exception: it publishes to Kafka and never talks to Temporal at all.
+
+| Component | What it does on the connection | Needs Cloud config | Ships the `cloud` / `cloud-mtls` profiles |
+| :- | :- | :- | :- |
+| `order-email-worker` | Worker — executes `OrderEmailWorkflow` and its activities | Yes | ✅ |
+| `consumer-external` | Client only — starts workflows, executes none | Yes | ✅ (plus a `SASL_SSL` Kafka block that is inert — see below) |
+| `consumer-workflow` | Client **and** worker — hosts the consumer workflow and its poll/start/commit activities | Yes | ✅ |
+| `consumer-activity` | Client **and** worker — hosts the long-running consume activity | Yes | ✅ |
+| `producer` | Nothing. Kafka only | No | n/a |
+| `scripts/*.sh` | `temporal` CLI — lists and terminates consumer workflows between runs | Yes | n/a, env vars only |
+
+Each template offers two auth mechanisms, and **which one you get is a matter of which profiles are
+active**, not of editing YAML. One set of exports covers every component.
+
+**Option A, API key** — the `cloud` profile alone:
 
 ```bash
 export TEMPORAL_ADDRESS=my-namespace.a1b2c.tmprl.cloud:7233
 export TEMPORAL_NAMESPACE=my-namespace.a1b2c
-export TEMPORAL_API_KEY=...       # or use the mTLS block instead
-mvn -f order-email-worker/pom.xml spring-boot:run -Dspring-boot.run.profiles=cloud
+export TEMPORAL_API_KEY=...
+export SPRING_PROFILES_ACTIVE=cloud
 ```
+
+**Option B, mTLS** — `cloud` *plus* `cloud-mtls`. Both profiles, and leave `TEMPORAL_API_KEY` unset so
+no auth header is added on top of the certificate:
+
+```bash
+export TEMPORAL_ADDRESS=my-namespace.a1b2c.tmprl.cloud:7233
+export TEMPORAL_NAMESPACE=my-namespace.a1b2c
+export TEMPORAL_TLS_CLIENT_CERT_PATH=/path/client.pem
+export TEMPORAL_TLS_CLIENT_KEY_PATH=/path/client.key
+export SPRING_PROFILES_ACTIVE=cloud,cloud-mtls
+```
+
+The key must be **PKCS8** (`-----BEGIN PRIVATE KEY-----`). Convert a PKCS1 key
+(`-----BEGIN RSA PRIVATE KEY-----`) with `openssl pkcs8 -topk8 -nocrypt -in old.key -out new.key`, or
+for a `.p12`/`.pfx` bundle set `mtls.pkcs: 12` in the profile and supply `key-file` alone. Get the
+path wrong and startup fails immediately with `NoSuchFileException` naming the variable, which is
+deliberate: a credential that half-applies is worse than one that refuses to start.
+
+With the exports in place, start each Temporal-connected process in its own terminal exactly as in
+the [Quickstart](#quickstart). There is no `temporal server start-dev` step:
+
+```bash
+mvn -f order-email-worker/pom.xml spring-boot:run
+mvn -f consumer-external/pom.xml  spring-boot:run     # Pattern 1
+mvn -f consumer-workflow/pom.xml  spring-boot:run     # Pattern 2
+mvn -f consumer-activity/pom.xml  spring-boot:run     # Pattern 3
+
+# The producer holds no Temporal connection, so the profile is irrelevant to it.
+mvn -f producer/pom.xml spring-boot:run
+```
+
+`SPRING_PROFILES_ACTIVE` is used above in preference to `-Dspring-boot.run.profiles=cloud` on each
+command for two reasons: it cannot be forgotten in one of four terminals, and it is the only form
+that reaches `scripts/load-test.sh`, which starts consumers with `java -jar` — those inherit the
+environment but never see the Maven flag.
+
+**These profiles force TLS on** (`enable-https: true`), whichever mechanism you use, and that is
+load-bearing. Left to itself, an unset `TEMPORAL_API_KEY` resolves to empty, the SDK sees no
+credential of any kind, and the channel falls back to **plaintext** — against a TLS-only Cloud
+endpoint that surfaces as a connection reset, which reads like a network fault rather than a missing
+credential. Forcing TLS on turns that into an auth error at the first call instead. If you point the
+cloud profile at a self-hosted Temporal with no TLS, override it with
+`SPRING_TEMPORAL_CONNECTION_ENABLE_HTTPS=false`.
+
+Anything in these profiles can also be supplied as a bare environment variable, no profile involved,
+because Spring's relaxed binding maps `SPRING_TEMPORAL_CONNECTION_API_KEY` and
+`SPRING_TEMPORAL_CONNECTION_MTLS_KEY_FILE` onto the same properties on top of the default
+`application.yml`. Useful for a one-off override; the profiles are the maintained path.
+
+**Forgetting the profile is the quiet failure; forgetting a variable is the loud one.** On the cloud
+profiles every placeholder is required, so an unset `TEMPORAL_ADDRESS` refuses to start and names
+`${TEMPORAL_ADDRESS}` in the error. Without a profile active, though, the base `application.yml`
+applies its own default of `local`, and that literal short-circuits the connection entirely: the app
+talks plaintext to `127.0.0.1:7233` and ignores every credential in your environment. Exporting the
+whole Cloud set but omitting `SPRING_PROFILES_ACTIVE` therefore runs happily against a dev server
+that may not even be there, which is the one case here that fails silently rather than loudly.
+
+**Kafka is a separate question, and a secured broker is not solved here.** Every module builds its
+Kafka client config in code from `spring.kafka.bootstrap-servers` alone — see `KafkaConsumerConfig`,
+`producer`'s `KafkaConfig`, and `common/kafka/KafkaConsumers`. None of them read
+`spring.kafka.properties`, which means the `SASL_SSL` block in `consumer-external`'s cloud profile
+does not currently reach its consumer factory or its DLT template. Pointing this repo at a managed
+Kafka needs those client configs to merge Spring's `KafkaProperties`, which is a code change rather
+than a YAML one. The scripts under `scripts/` are further still from it: they require the *local*
+Docker broker no matter where Temporal runs, because they drive `kafka-topics.sh` and
+`kafka-consumer-groups.sh` through `docker exec kafka`.
 
 These variable names match Temporal's
 [environment configuration](https://docs.temporal.io/develop/environment-configuration) convention,
