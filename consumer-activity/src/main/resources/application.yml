@@ -9,7 +9,7 @@ spring:
 
   temporal:
     connection:
-      target: ${TEMPORAL_TARGET:local}
+      target: ${TEMPORAL_ADDRESS:local}
     namespace: ${TEMPORAL_NAMESPACE:default}
     workers-auto-discovery:
       packages: io.temporal.samples.kafka.consumer.activity

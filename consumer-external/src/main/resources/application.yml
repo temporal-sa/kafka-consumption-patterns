@@ -9,7 +9,7 @@ spring:
 
   temporal:
     connection:
-      target: ${TEMPORAL_TARGET:local}
+      target: ${TEMPORAL_ADDRESS:local}
     namespace: ${TEMPORAL_NAMESPACE:default}
     # No workers here on purpose: this app is a Temporal client. order-email-worker executes
     # the workflows it starts.

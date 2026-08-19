@@ -8,7 +8,7 @@ spring:
   temporal:
     connection:
       # "local" targets a `temporal server start-dev` instance on 127.0.0.1:7233
-      target: ${TEMPORAL_TARGET:local}
+      target: ${TEMPORAL_ADDRESS:local}
     namespace: ${TEMPORAL_NAMESPACE:default}
     workers-auto-discovery:
       # Picks up @WorkflowImpl / @ActivityImpl and creates a worker per referenced task queue.
