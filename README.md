@@ -235,9 +235,12 @@ together, 6.1 s and 6.4 s at p50 against tens of milliseconds everywhere else, w
 rather than either consumer. **Do not use this column to rank patterns 1 and 3.** Their ranges
 overlap, and the spread within each is wider than the distance between them.
 
-There is deliberately no column above 100/s. The producer in this repo tops out near **170 events/s**
-on this hardware, so higher rungs measure the producer instead of the consumers. A ladder run out to
-250 and 500 events/s delivered the same ~170/s at both. An earlier version of this table did publish a
+There is deliberately no column above 100/s. The producer in this repo tops out around **160
+events/s** on this hardware, so higher rungs measure the producer instead of the consumers. That is
+measured rather than inferred: a case requesting 400/s delivered 157.3/s, and a ladder run out to 250
+and 500 events/s offered the same load at both. `scripts/load-test.sh` now reports delivered rate
+against requested rate per case and warns when they diverge, so this is visible at the point of
+measurement. An earlier version of this table did publish a
 150/s column, and it disagreed with itself by **1.95×** between two runs on one afternoon, which is
 what a rate sitting just under the producer's ceiling produces. The batch-size result below is 15×,
 comfortably outside all of this.
