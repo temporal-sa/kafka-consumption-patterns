@@ -418,8 +418,9 @@ And it should close by pointing past consumption: the target workflows started b
 
 Purpose: replace "I don't know without writing code and doing performance testing" with data.
 
-**Method.** Fix the topic at 6 partitions and the target workflow's chaos rates at zero. For each pattern, drive the producer at increasing rates (e.g. 10, 50, 100, 250, 500 events/s) and record:
+**Method.** Fix the topic at 6 partitions and the target workflow's chaos rates at zero. **First establish the producer's own ceiling on the hardware under test**, then choose rungs below it: any rate the producer cannot sustain measures the producer instead of the consumer, and reports it as a consumer result (Finding 5). On the laptop these numbers came from that ceiling is near 157 events/s, so the ladder is 10, 50, 100, 150 events/s. For each pattern, drive the producer at those rates and record:
 
+- Delivered rate against requested rate, so a producer-bound case is visible at the point of measurement rather than derived from lag arithmetic afterwards
 - Sustained throughput before consumer lag grows monotonically
 - p50 / p95 / p99 event-timestamp → workflow-start latency
 - Actions/second consumed, measured against the 500 Actions/s default namespace limit
@@ -434,33 +435,53 @@ Purpose: replace "I don't know without writing code and doing performance testin
 
 The load test is a deliverable of the repo (scripts + methodology). Executing it and publishing results is explicitly follow-on work, so that the implementation milestone isn't gated on benchmark cycles.
 
-### 12.1 Findings from the first run (2026-08-13)
+### 12.1 Findings from the load-test runs (2026-08-13, 2026-08-18, 2026-08-19)
 
-Single instance, 6-partition topic, 40s per case, all components on one laptop with a Temporal dev server. `RESOURCE_EXHAUSTED` was zero throughout, so none of this is namespace rate limiting.
+Single instance, 6-partition topic, 40 to 45s per case, all components on one laptop with a Temporal dev server. `RESOURCE_EXHAUSTED` was zero throughout, so none of this is namespace rate limiting.
 
-| Pattern | 10/s | 50/s | 150/s | p50 @ 50/s |
+| Pattern | 10/s | 50/s | 100/s | p50 @ 50/s |
 | :- | :- | :- | :- | :- |
-| 1 — External App | 10.3 ✓ | 51.6 ✓ | 70.0 ✗ | 0.011 s |
+| 1 — External App | 10.3 ✓ | 51.6 ✓ | 93–103 ~ | 0.011 s |
 | 2 — Workflow (batch 1) | **3.4 ✗** | **3.4 ✗** | **3.4 ✗** | **24.7 s** |
-| 3 — Long-Running Activity | 10.3 ✓ | 51.5 ✓ | 138.2 ✗ | 0.011 s |
+| 3 — Long-Running Activity | 10.3 ✓ | 51.5 ✓ | 99–107 ~ | 0.011 s |
 
-**Finding 1 — batch size is a throughput decision, not just a cost decision.** Pattern 2 at one record per poll is pinned near 3.4 msg/s *regardless of offered rate*, and cannot keep up with even 10 events/s. Each message costs three serialized activity round-trips (poll → start → commit), a hard floor unrelated to Kafka or the target workflow. At `batch-size=50` the same pattern reaches 51.7 msg/s with 0.57s p50 — **15× throughput, 45× latency**.
+✓ kept up. ✗ fell behind, so the figure is a ceiling rather than a rate. ~ at the saturation edge, keeping up in most runs but not all. The 100/s column is a range over six runs; the 150/s column an earlier draft published is retired, because it sat just under the producer's own ceiling and disagreed with itself by 1.95× (Findings 2 and 5).
+
+**Finding 1 — batch size is a throughput decision, not just a cost decision.** Pattern 2 at one record per poll sits near 3.4 msg/s *at every rate from 10/s to 100/s offered*, and cannot keep up with even 10 events/s. Each message costs three serialized activity round-trips (poll → start → commit), a hard floor unrelated to Kafka or the target workflow. At `batch-size=50` the same pattern reaches 51.7 msg/s with 0.57s p50 — **15× throughput, 45× latency**.
 
 Because instances are capped by partition count, batch-size 1 tops out around 6 × 3.4 ≈ 20 msg/s for the *entire pattern* on a 6-partition topic. It cannot be scaled into viability.
 
+"Pinned regardless of offered rate" turns out to be the optimistic reading. Under a deep backlog the loop gets *slower*: at roughly 170/s offered it managed **1.5 and 1.6 msg/s** across two cases, with history length falling to about 1,530 from 3,519, so fewer poll cycles completed rather than each one costing more. No mechanism is established for this and none should be asserted. It is recorded as an open question, and it strengthens rather than weakens the finding.
+
 **This is the single most consequential thing the repo measured, and it is not visible in the source doc's cost table at all** — that table compares Actions per message and is silent on throughput. On Actions alone, batch-size 1 looks merely expensive; in practice it is unusable above trivial volumes. Recommend adding a throughput row to the reference architecture's trade-off table, and stating that batch-size 1 exists to reproduce the published cost figure rather than as a production configuration.
 
-**Finding 2 — saturation figures on this hardware are too noisy to rank patterns 1 and 3.** At 150/s offered, Pattern 1 measured 70.0 msg/s in one run and 97.4 msg/s in a repeat of the *identical* configuration — roughly 40% run-to-run variance. Any ranking of patterns 1 and 3 built on single saturation runs is therefore unsupported, and an earlier draft of this section wrongly attributed a 70-vs-138 gap to commit granularity.
+**Finding 2 — saturation figures on this hardware are too noisy to rank patterns 1 and 3.** At 150/s offered, Pattern 3 measured 138.2 msg/s in one run and 70.9 in a repeat of the *identical* configuration, a **1.95×** spread on a single afternoon. Pattern 1 spread 1.15× across the same pair. Below saturation the picture is entirely different: six runs at 100/s spanned **1.11×** for Pattern 1 and **1.07×** for Pattern 3, with the two patterns statistically indistinguishable at roughly 102 msg/s each. Any ranking of patterns 1 and 3 built on single saturation runs is therefore unsupported, and an earlier draft of this section wrongly attributed a 70-vs-138 gap to commit granularity.
 
 Two consequences. First, the batch-size finding above stands comfortably because 15× is far outside this noise band, whereas differences under ~2× on a saturated laptop are not interpretable. Second, any future ranking of patterns 1 and 3 needs repeated runs with a variance figure, on hardware that is not also running the broker, the worker, and the Temporal service.
 
 There is a plausible mechanism worth *testing* rather than asserting: Pattern 1 uses `AckMode.MANUAL_IMMEDIATE` and commits per record, while Pattern 3 commits once per poll batch, so per-record commit costs a synchronous broker round-trip per message. That is a hypothesis, not a result. It should not change Pattern 1's implementation regardless — ack-per-record ordering is what makes its correctness story simple to explain.
 
+The six repeated runs at 100/s are weak evidence against it mattering below saturation. If per-record commit carried a meaningful cost, Pattern 1 should be measurably slower than Pattern 3 wherever both are cleanly fed and repeatable. It is not: the two land within a percent of each other. Whatever the commit granularity costs, it is smaller than the run-to-run noise at the only rate where that noise is small enough to see through.
+
 **Finding 3 — scale-out is sub-linear and mostly buys latency.** At 150/s offered, tripling consumers took Pattern 1 from 60.7 to 129.5 msg/s (2.13×) and Pattern 3 from 70.9 to 148.9 (2.10×). The throughput gain is real but well short of 3×; the latency gain is the larger effect — Pattern 3's p50 fell from 14.5s to 0.84s, Pattern 1's from 22.3s to 5.0s. Combined with §7.4's partition ceiling, the practical guidance is: scale out to reduce latency and to reach the partition count, not in the expectation of linear throughput.
+
+Treat those two multiples as **lower bounds rather than measurements**. Pattern 3's 3-consumer figure of 148.9 msg/s is within 5% of the producer's own ~157/s ceiling, so that run was probably starved and its real capacity is higher. The single-consumer baselines have the opposite problem, being one draw from a distribution that spans 1.95× at this rate. The sub-linearity conclusion survives both, since neither error is anywhere near large enough to turn 2.1× into 3×, and the latency result is unaffected because latency was never near a producer limit.
 
 **Finding 3a — the source doc's cost row is not comparable across columns.** Working through one poll cycle at batch size N, the Workflow pattern schedules three activities and starts N workflows: 3 + N Actions for N messages, or 1 + 3/N per message. The published figure of 3 per message counts the three activity schedules but omits the workflow start — which is exactly what the External Client column's "1 action per message" *is*. Corrected, the Workflow pattern costs **4 Actions per message unbatched and 1.06 batched at 50**, against 1 for the other two. "Most Expensive" is therefore true only in the configuration nobody should run. The load-test harness had inherited the same inconsistency (modeling Pattern 2 as 3/batch rather than 1 + 3/batch) and has been corrected.
 
-**Finding 4 — the ceiling under load is the worker, not the consumers.** Worker CPU stayed under 4% while patterns 1 and 3 both stalled, and no rate limiting occurred, so the binding constraint on this hardware is round-trip latency through the local Temporal service rather than any consumer-side capacity. This reinforces §7.4: consumption is rarely the part worth optimizing.
+**Finding 4 — what the ceiling is not.** Across 15 cases `RESOURCE_EXHAUSTED` was zero, worker CPU never exceeded 5%, and worker heap stayed under 190 MB. Neither the namespace Actions limit nor worker capacity was the binding constraint. Above roughly 150/s the question cannot be asked at all on this hardware, because the producer saturates near 157 events/s and every higher rung measures it instead (Finding 5).
+
+So the constraint that stalls patterns 1 and 3 between 50 and 100 events/s is **not yet identified**. Candidates worth isolating are round-trip latency through the local Temporal service, single-JVM consumer limits, and broker contention from running every component on one machine. An earlier draft of this finding asserted the worker was the ceiling while citing sub-4% worker CPU as the evidence, which does not follow, and then substituted a round-trip-latency claim that the run did not test.
+
+None of this weakens §7.4. Whatever binds first, it is measurably not consumption itself, which is the point that guidance rests on.
+
+**Finding 5 — the harness could not distinguish offered load from delivered load.** The producer on this hardware saturates near **157 events/s**, measured directly by bracketing the window with the topic's `LOG-END-OFFSET`. The original ladder ran to 500, so a third of its cases were measuring the producer while reporting the result as a consumer figure. The 250 and 500 rungs offered the same load under different labels, which is why they produced similar and occasionally inverted results, and why a "kept up" verdict appeared at 500/s where lag was small only because little had arrived.
+
+`kept_up` compounded it by comparing final lag against the *requested* rate, so the threshold moved with each row: at 500/s requested any lag under 500 records passed, while the same lag at 50/s failed. The column was therefore not comparable between rows.
+
+Both are fixed. `scripts/load-test.sh` reports delivered rate against requested rate for every case and warns when they diverge, `kept_up` compares against measured throughput, and the default ladder stops at 150. Recomputing the corrected verdict over all 41 saved result rows changes none of them, so no published figure depended on the bug.
+
+The transferable lesson is in §12's method: **establish the producer's ceiling before choosing rungs**. A benchmark that cannot tell "the consumer could not keep up" from "the producer never sent it" will confidently report the second as the first.
 
 ---
 

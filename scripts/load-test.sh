@@ -47,7 +47,7 @@ source "$REPO_ROOT/scripts/lib/common.sh"
 # ---------------------------------------------------------------------------- configuration
 
 PATTERNS="${PATTERNS:-ext wf act}"
-# Stops at 150 because the producer on a single laptop tops out around 160 events/s: a case
+# Stops at 150 because the producer on a single laptop tops out near 157 events/s: a case
 # requesting 400/s delivered 157.3/s. Rungs above that measure the producer, not the consumer, and a
 # ladder run to 250 and 500 offered the same load at both, identical cases wearing different labels.
 # Raise it only where you have confirmed the producer can feed it, and watch DELIV when you do.

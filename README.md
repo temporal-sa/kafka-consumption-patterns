@@ -235,8 +235,8 @@ together, 6.1 s and 6.4 s at p50 against tens of milliseconds everywhere else, w
 rather than either consumer. **Do not use this column to rank patterns 1 and 3.** Their ranges
 overlap, and the spread within each is wider than the distance between them.
 
-There is deliberately no column above 100/s. The producer in this repo tops out around **160
-events/s** on this hardware, so higher rungs measure the producer instead of the consumers. That is
+There is deliberately no column above 100/s. The producer in this repo tops out near **157 events/s**
+on this hardware, so higher rungs measure the producer instead of the consumers. That is
 measured rather than inferred: a case requesting 400/s delivered 157.3/s, and a ladder run out to 250
 and 500 events/s offered the same load at both. `scripts/load-test.sh` now reports delivered rate
 against requested rate per case and warns when they diverge, so this is visible at the point of
@@ -272,9 +272,11 @@ Three caveats worth stating before quoting any of this. These numbers are one la
 dev-server Temporal and a single broker, which makes them useful for comparing the patterns under
 identical conditions and useless as absolute capacity. `RESOURCE_EXHAUSTED` was zero throughout and
 worker CPU never passed 5%, so neither the namespace limit nor the shared worker was the constraint.
-And 150/s offered is close to the producer's own ceiling, so the single-consumer column here is the
-low end of what that configuration produces across runs, which makes the 3-consumer column the more
-trustworthy half of the comparison.
+And both columns have a problem, in opposite directions, so read the gains as lower bounds. Pattern
+3's 148.9 is within 5% of the producer's own ~157/s ceiling, so that run was probably starved and its
+real capacity is higher. The single-consumer figures are one draw from a distribution that spans
+1.95× at this rate. Neither error is large enough to turn 2.1× into 3×, which is the only claim this
+table is making.
 
 ## Action cost
 
