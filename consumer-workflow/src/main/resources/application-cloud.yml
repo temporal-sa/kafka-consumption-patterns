@@ -1,36 +1,30 @@
-# Temporal Cloud + secured Kafka template (PRD section 8.3).
+# Temporal Cloud connection template (PRD section 8.3).
 #
 # Activate with:  --spring.profiles.active=cloud                 (API key)
 #            or:  --spring.profiles.active=cloud,cloud-mtls      (mTLS)
 #
-# Declarative only — no code path differs between local and cloud, so this profile cannot drift
-# behaviorally from what the test suite covers locally (PRD NG8). Supply credentials through
+# Deliberately declarative only — no code paths differ between local and cloud, so this profile
+# cannot drift behaviorally from what CI tests locally (PRD NG8). Supply credentials through
 # environment variables; never commit them.
 #
-# Pick ONE Temporal auth mechanism. The API key below is the default; the mTLS document at the bottom
-# of this file replaces it and only applies when the cloud-mtls profile is active too. Both are live
+# This module is both a client and a worker: it starts OrderEmailWorkflow executions on the worker's
+# task queue AND hosts KafkaConsumerWorkflow plus its poll/start/commit activities on its own
+# instance-scoped queue. One connection serves both, so there is nothing extra to configure here.
+#
+# Kafka is a separate concern: this module reads only spring.kafka.bootstrap-servers, which the base
+# application.yml already takes from KAFKA_BOOTSTRAP_SERVERS. A secured broker needs more than
+# config — see the Temporal Cloud section of the root README.
+#
+# Pick ONE auth mechanism. The API key below is the default; the mTLS document at the bottom of this
+# file replaces it and only applies when the cloud-mtls profile is active too. Both are live
 # configuration — neither is commented out, because a commented-out credential block is how you end
 # up talking plaintext to a TLS-only endpoint and reading "connection reset" as a network problem.
 
 spring:
-  kafka:
-    bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS}
-    # NOTE: inert as things stand. KafkaConsumerConfig builds its consumer factory and DLT template
-    # from spring.kafka.bootstrap-servers alone and never consults Spring's KafkaProperties, so
-    # nothing below reaches a client. Pointing this repo at a managed Kafka is a code change in that
-    # class (and in common/kafka/) rather than a config change. Kept here as the shape of the answer.
-    properties:
-      security.protocol: SASL_SSL
-      sasl.mechanism: PLAIN
-      sasl.jaas.config: >
-        org.apache.kafka.common.security.plain.PlainLoginModule required
-        username="${KAFKA_API_KEY}"
-        password="${KAFKA_API_SECRET}";
-
   temporal:
-    namespace: ${TEMPORAL_NAMESPACE}          # e.g. my-namespace.a1b2c
+    namespace: ${TEMPORAL_NAMESPACE}            # e.g. my-namespace.a1b2c
     connection:
-      target: ${TEMPORAL_ADDRESS}             # e.g. my-namespace.a1b2c.tmprl.cloud:7233
+      target: ${TEMPORAL_ADDRESS}               # e.g. my-namespace.a1b2c.tmprl.cloud:7233
 
       # TLS on unconditionally, whichever mechanism is in use. Without this, an unset TEMPORAL_API_KEY
       # resolves to empty, the SDK sees no credential of any kind, and the channel silently falls back
