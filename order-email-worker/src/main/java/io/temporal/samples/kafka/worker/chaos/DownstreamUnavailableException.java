@@ -5,7 +5,7 @@ package io.temporal.samples.kafka.worker.chaos;
  *
  * <p>An ordinary RuntimeException, so Temporal treats it as retryable and applies the activity's
  * retry policy. Nothing here is Temporal-specific: this is what a real client library failure looks
- * like, and the retry behaviour comes from the activity options rather than from the exception type.
+ * like, and the retry behavior comes from the activity options rather than from the exception type.
  */
 public class DownstreamUnavailableException extends RuntimeException {
 

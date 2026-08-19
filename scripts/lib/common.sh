@@ -77,6 +77,25 @@ total_lag() {
     END { print (seen ? s+0 : 999999) }' <<<"$out"
 }
 
+# Total records written to the topic, summed across partitions, from LOG-END-OFFSET.
+#
+# Two snapshots of this bracket the measurement window and give what the producer ACTUALLY delivered,
+# which is not the same thing as the rate it was asked for. A producer that cannot sustain the
+# requested rate otherwise turns the whole case into a measurement of the producer, with nothing in
+# the output saying so.
+#
+# Reads the same --describe output as total_lag, so it needs no separate offset tool. Requires the
+# group to hold partitions already; before that it reports 0 and callers must not treat it as a
+# measurement.
+#
+#   columns: GROUP TOPIC PARTITION CURRENT-OFFSET LOG-END-OFFSET LAG ...
+#            $1    $2    $3        $4             $5             $6
+topic_end_offset() {
+  local group="$1" out
+  out=$(kafka kafka-consumer-groups.sh --describe --group "$group" 2>/dev/null || true)
+  awk -v t="$TOPIC" '$2==t && $5 ~ /^[0-9]+$/ { s += $5 } END { print s+0 }' <<<"$out"
+}
+
 # Number of members currently in the group. This, not lag, is the correct readiness signal: a group
 # can have members long before it has any committed offsets to report.
 group_member_count() {

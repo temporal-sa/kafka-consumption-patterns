@@ -33,7 +33,7 @@ public interface KafkaConsumerActivities {
    * <p>Idempotent: redelivered orders resolve to the same workflow ID and are counted as duplicates
    * rather than started twice.
    *
-   * @return how many were newly started, as opposed to recognised as duplicates
+   * @return how many were newly started, as opposed to recognized as duplicates
    */
   int startTargetWorkflows(List<ConsumedOrder> orders);
 

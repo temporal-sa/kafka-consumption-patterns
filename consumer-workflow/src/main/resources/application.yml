@@ -9,7 +9,7 @@ spring:
 
   temporal:
     connection:
-      target: ${TEMPORAL_TARGET:local}
+      target: ${TEMPORAL_ADDRESS:local}
     namespace: ${TEMPORAL_NAMESPACE:default}
     workers:
       # ONE worker, on ONE instance-scoped task queue, hosting BOTH the consumer workflow and its

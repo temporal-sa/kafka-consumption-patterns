@@ -3,7 +3,7 @@
 # Activate with:  --spring.profiles.active=cloud
 #
 # Deliberately declarative only — no code paths differ between local and cloud, so this profile
-# cannot drift behaviourally from what CI tests locally (PRD NG8). Supply credentials through
+# cannot drift behaviorally from what CI tests locally (PRD NG8). Supply credentials through
 # environment variables; never commit them.
 #
 # Use ONE of the two auth mechanisms below.
@@ -12,12 +12,12 @@ spring:
   temporal:
     namespace: ${TEMPORAL_NAMESPACE}            # e.g. my-namespace.a1b2c
     connection:
-      target: ${TEMPORAL_TARGET}                # e.g. my-namespace.a1b2c.tmprl.cloud:7233
+      target: ${TEMPORAL_ADDRESS}               # e.g. my-namespace.a1b2c.tmprl.cloud:7233
 
       # --- Option A: API key -------------------------------------------------
       apiKey: ${TEMPORAL_API_KEY:}
 
       # --- Option B: mTLS ----------------------------------------------------
       # mtls:
-      #   key-file: ${TEMPORAL_TLS_KEY}
-      #   cert-chain-file: ${TEMPORAL_TLS_CERT}
+      #   key-file: ${TEMPORAL_TLS_CLIENT_KEY_PATH}
+      #   cert-chain-file: ${TEMPORAL_TLS_CLIENT_CERT_PATH}

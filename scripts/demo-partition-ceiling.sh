@@ -223,7 +223,7 @@ cat <<EOF
       * Scaling below the ceiling is real but sub-linear. Doubling consumers rarely doubles the
         rate, because something else starts to bind first: the target workflows, the worker pool,
         or the namespace's Actions-per-second limit. Consumption is rarely the part worth
-        optimising.
+        optimizing.
 
       * Once one of those is the binding constraint, the rate flattens for reasons that have
         nothing to do with partitions. Only the IDLE column proves the partition ceiling itself.

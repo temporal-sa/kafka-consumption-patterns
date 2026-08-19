@@ -46,7 +46,7 @@
     <!--
       Plain kafka-clients (not spring-kafka): patterns 2 and 3 drive poll/commit explicitly from
       inside activities, so they need the raw consumer. Sharing the decode and dead-letter helpers
-      here is what keeps poison-message behaviour identical across all three patterns (FR-X4).
+      here is what keeps poison-message behavior identical across all three patterns (FR-X4).
     -->
     <dependency>
       <groupId>org.apache.kafka</groupId>

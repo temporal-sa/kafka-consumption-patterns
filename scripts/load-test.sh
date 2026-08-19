@@ -8,7 +8,7 @@
 #
 #   * sustained throughput, and whether the consumer kept up (lag flat vs growing)
 #   * p50 / p95 / p99 latency from event timestamp to workflow start
-#   * modelled consumption Actions/sec, against the namespace's Actions/sec limit
+#   * modeled consumption Actions/sec, against the namespace's Actions/sec limit
 #   * RESOURCE_EXHAUSTED rate observed by the SDK
 #   * worker CPU and heap while the case ran
 #   * for Pattern 2: event-history growth and continue-as-new count
@@ -23,7 +23,8 @@
 #
 # Environment:
 #   PATTERNS   patterns to test: ext (external app), wf (workflow), act (activity). Default all.
-#   RATES      producer rates in events/sec. Default "10 50 100 250 500" (PRD section 12).
+#   RATES      producer rates in events/sec. Default "10 50 100 150"; see the note at the
+#              assignment before raising it, and check DELIV in the output if you do.
 #   SCALES     consumers per pattern. Default "1". Use "1 3 6" for the scale-out matrix.
 #   DURATION   seconds to hold each rate. Default 45.
 #   PARTITIONS topic partitions. Default 6.
@@ -46,7 +47,11 @@ source "$REPO_ROOT/scripts/lib/common.sh"
 # ---------------------------------------------------------------------------- configuration
 
 PATTERNS="${PATTERNS:-ext wf act}"
-RATES="${RATES:-10 50 100 250 500}"
+# Stops at 150 because the producer on a single laptop tops out near 157 events/s: a case
+# requesting 400/s delivered 157.3/s. Rungs above that measure the producer, not the consumer, and a
+# ladder run to 250 and 500 offered the same load at both, identical cases wearing different labels.
+# Raise it only where you have confirmed the producer can feed it, and watch DELIV when you do.
+RATES="${RATES:-10 50 100 150}"
 SCALES="${SCALES:-1}"
 DURATION="${DURATION:-45}"
 PARTITIONS="${PARTITIONS:-6}"
@@ -206,11 +211,12 @@ run_case() {
   sleep "$SETTLE_S"
 
   # --- baseline snapshot
-  local consumed_0 started_0 exhausted_0 lag_0 t0
+  local consumed_0 started_0 exhausted_0 lag_0 produced_0 t0
   consumed_0=$(scrape_sum "$url" "^kafka_messages_consumed_total")
   started_0=$(scrape_sum "$url" "^temporal_workflows_started_total")
   exhausted_0=$(scrape_sum "$url" "^temporal_(long_)?request_failure.*RESOURCE_EXHAUSTED")
   lag_0=$(total_lag "$group")
+  produced_0=$(topic_end_offset "$group")
   t0=$(now_ms)
 
   # --- hold the rate, sampling lag and worker load
@@ -232,7 +238,8 @@ run_case() {
   curl -sf -X DELETE "$PRODUCER_URL/orders/stream" -o /dev/null || true
 
   # --- final snapshot
-  local consumed_1 started_1 exhausted_1 p50 p95 p99
+  local consumed_1 started_1 exhausted_1 produced_1 p50 p95 p99
+  produced_1=$(topic_end_offset "$group")
   consumed_1=$(scrape_sum "$url" "^kafka_messages_consumed_total")
   started_1=$(scrape_sum "$url" "^temporal_workflows_started_total")
   exhausted_1=$(scrape_sum "$url" "^temporal_(long_)?request_failure.*RESOURCE_EXHAUSTED")
@@ -240,7 +247,7 @@ run_case() {
   p95=$(scrape "$url" '^kafka_event_to_workflow_start_seconds\{.*quantile="0.95"')
   p99=$(scrape "$url" '^kafka_event_to_workflow_start_seconds\{.*quantile="0.99"')
 
-  local window_s throughput started_rate cpu_avg actions kept_up
+  local window_s throughput started_rate cpu_avg actions kept_up delivered
   window_s=$(awk -v a="$t0" -v b="$t1" 'BEGIN{printf "%.3f", (b-a)/1000}')
   throughput=$(awk -v c0="$consumed_0" -v c1="$consumed_1" -v w="$window_s" \
                    'BEGIN{printf "%.1f", (w>0 ? (c1-c0)/w : 0)}')
@@ -250,9 +257,19 @@ run_case() {
   actions=$(awk -v t="$throughput" -v f="$(pattern_action_factor "$pattern")" \
                    'BEGIN{printf "%.1f", t*f}')
 
-  # "Kept up" = the consumer is not falling behind. Lag below one second of production is noise
-  # from the sampling boundary; lag growing well past that means the rate exceeded capacity.
-  kept_up=$(awk -v l="$lag_last" -v r="$rate" 'BEGIN{print (l <= r ? "yes" : "NO")}')
+  # What the producer actually put on the topic, which is the load the consumer was really offered.
+  # Prints "-" rather than a wrong number if either offset snapshot came back unusable.
+  delivered=$(awk -v a="$produced_0" -v b="$produced_1" -v w="$window_s" \
+                  'BEGIN{ if (a<=0 || b<=0 || w<=0 || b<a) print "-"; else printf "%.1f", (b-a)/w }')
+
+  # "Kept up" = the consumer is not falling behind. Lag below one second of throughput is noise from
+  # the sampling boundary; lag well past that means the offered load exceeded capacity.
+  #
+  # Measured throughput, NOT the requested rate. Where the producer cannot deliver what was asked
+  # for, the requested figure is an arbitrarily generous allowance: at 500/s requested it would pass
+  # any lag under 500 records, while the same lag at 50/s requested would fail. That made the column
+  # incomparable between rows, which is the one thing a yes/no column has to get right.
+  kept_up=$(awk -v l="$lag_last" -v t="$throughput" 'BEGIN{print (l <= t ? "yes" : "NO")}')
 
   # Pattern 2 exposes loop internals worth recording: history growth is the direct cost of its
   # per-message visibility.
@@ -269,19 +286,31 @@ run_case() {
   local exhausted_delta
   exhausted_delta=$(awk -v a="$exhausted_0" -v b="$exhausted_1" 'BEGIN{printf "%.0f", b-a}')
 
+  info "producer delivered ${delivered}/s of the ${rate}/s requested"
   info "throughput ${throughput} msg/s  |  starts ${started_rate}/s  |  lag ${lag_last}  |  kept up: ${kept_up}"
   info "latency p50/p95/p99: ${p50}s / ${p95}s / ${p99}s"
-  info "modelled consumption Actions/s: ${actions}  |  RESOURCE_EXHAUSTED: ${exhausted_delta}"
+
+  # A producer that cannot hit the requested rate makes this case a measurement of the producer.
+  # Say so at the point of measurement rather than leaving a reader to derive it from lag arithmetic
+  # weeks later.
+  if [ "$delivered" != "-" ] \
+     && awk -v d="$delivered" -v r="$rate" 'BEGIN{exit !(d < 0.9*r)}'; then
+    warn "Producer fell short of the requested rate, so this case bounds the PRODUCER, not the consumer."
+    warn "Treat ${rate}/s as ${delivered}/s, and do not compare it against cases that were fully fed."
+  fi
+  info "modeled consumption Actions/s: ${actions}  |  RESOURCE_EXHAUSTED: ${exhausted_delta}"
   [ "$pattern" = "wf" ] && info "history length ${history}, continuations ${continuations}"
 
   local batch_col="-"
   [ "$pattern" = "wf" ] && batch_col="$BATCH_SIZE"
 
-  RESULTS+=("$pattern|$rate|$scale|$throughput|$kept_up|$lag_last|$p50|$p95|$p99|$actions|$exhausted_delta|$cpu_avg|$heap_max|$history|$continuations|$batch_col")
-  printf '%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s\n' \
+  RESULTS+=("$pattern|$rate|$scale|$throughput|$kept_up|$lag_last|$p50|$p95|$p99|$actions|$exhausted_delta|$cpu_avg|$heap_max|$history|$continuations|$batch_col|$delivered")
+  # delivered_msg_s is appended rather than placed next to rate, so column positions stay stable for
+  # anything already reading these files.
+  printf '%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s\n' \
     "$pattern" "$rate" "$scale" "$throughput" "$kept_up" "$lag_last" \
     "$p50" "$p95" "$p99" "$actions" "$exhausted_delta" "$cpu_avg" "$heap_max" \
-    "$history" "$continuations" "$batch_col" >> "$OUT"
+    "$history" "$continuations" "$batch_col" "$delivered" >> "$OUT"
 
   stop_consumers
   sleep 5   # let the consumer group dissolve before the next case
@@ -315,7 +344,7 @@ HOLDS_LOCK=1
 check_common_prereqs
 terminate_orphans "kafka-consumer"
 
-# Chaos off: downstream failure injection would confound throughput with retry behaviour.
+# Chaos off: downstream failure injection would confound throughput with retry behavior.
 if curl -sf -X POST "$WORKER_URL/chaos/reset" -o /dev/null 2>/dev/null; then
   info "Downstream failure injection reset to zero"
 else
@@ -339,7 +368,7 @@ info "Cases:      $total_cases  (~${est_min} min)"
 info "CSV:        $OUT"
 
 mkdir -p "$(dirname "$OUT")"
-printf 'pattern,rate,scale,throughput_msg_s,kept_up,final_lag,p50_s,p95_s,p99_s,actions_s_modelled,resource_exhausted,worker_cpu_pct,worker_heap_bytes,history_length,continuations,batch_size\n' > "$OUT"
+printf 'pattern,rate,scale,throughput_msg_s,kept_up,final_lag,p50_s,p95_s,p99_s,actions_s_modeled,resource_exhausted,worker_cpu_pct,worker_heap_bytes,history_length,continuations,batch_size,delivered_msg_s\n' > "$OUT"
 
 for scale in "${SCALE_LIST[@]}"; do
   for rate in "${RATE_LIST[@]}"; do
@@ -353,18 +382,18 @@ done
 
 log "Results"
 printf '\n'
-printf '    %-6s %-7s %-6s %-6s %-10s %-8s %-8s %-9s %-9s %-11s %-6s\n' \
-  "PATT" "RATE" "SCALE" "BATCH" "THRUPUT" "KEPT UP" "LAG" "p50(s)" "p99(s)" "ACTIONS/s" "CPU%"
-printf '    %-6s %-7s %-6s %-6s %-10s %-8s %-8s %-9s %-9s %-11s %-6s\n' \
-  "----" "----" "-----" "-----" "-------" "-------" "---" "------" "------" "---------" "----"
+printf '    %-6s %-7s %-8s %-6s %-6s %-10s %-8s %-8s %-9s %-9s %-11s %-6s\n' \
+  "PATT" "RATE" "DELIV" "SCALE" "BATCH" "THRUPUT" "KEPT UP" "LAG" "p50(s)" "p99(s)" "ACTIONS/s" "CPU%"
+printf '    %-6s %-7s %-8s %-6s %-6s %-10s %-8s %-8s %-9s %-9s %-11s %-6s\n' \
+  "----" "----" "-----" "-----" "-----" "-------" "-------" "---" "------" "------" "---------" "----"
 for row in "${RESULTS[@]}"; do
-  IFS='|' read -r p r s thr kept lag p50 p95 p99 act exh cpu heap hist cont batch <<<"$row"
+  IFS='|' read -r p r s thr kept lag p50 p95 p99 act exh cpu heap hist cont batch deliv <<<"$row"
   # Micrometer reports seconds at full float precision; three decimals is plenty and keeps the
   # table readable.
   p50=$(awk -v v="$p50" 'BEGIN{printf "%.3f", v}')
   p99=$(awk -v v="$p99" 'BEGIN{printf "%.3f", v}')
-  printf '    %-6s %-7s %-6s %-6s %-10s %-8s %-8s %-9s %-9s %-11s %-6s\n' \
-    "$p" "$r" "$s" "$batch" "$thr" "$kept" "$lag" "$p50" "$p99" "$act" "$cpu"
+  printf '    %-6s %-7s %-8s %-6s %-6s %-10s %-8s %-8s %-9s %-9s %-11s %-6s\n' \
+    "$p" "$r" "$deliv" "$s" "$batch" "$thr" "$kept" "$lag" "$p50" "$p99" "$act" "$cpu"
 done
 printf '\n'
 info "Full results, including p95, RESOURCE_EXHAUSTED, heap, and Pattern 2 history growth: $OUT"
@@ -372,11 +401,16 @@ info "Full results, including p95, RESOURCE_EXHAUSTED, heap, and Pattern 2 histo
 log "Reading these numbers"
 cat <<EOF
 
-    THRUPUT vs RATE — where throughput tracks the requested rate and KEPT UP is "yes", the pattern
-    is comfortably within capacity. The first rate where KEPT UP flips to NO is that pattern's
-    ceiling under these conditions.
+    DELIV is what the producer actually put on the topic, against the RATE it was asked for. Compare
+    THRUPUT against DELIV, not against RATE. Where DELIV falls short of RATE the case bounds the
+    producer rather than the consumer, and a warning was printed above when that happened.
 
-    ACTIONS/s is MODELLED, not measured: throughput multiplied by the per-message cost. Every
+    THRUPUT vs DELIV — where throughput tracks what was delivered and KEPT UP is "yes", the pattern
+    is comfortably within capacity. The first rate where KEPT UP flips to NO is that pattern's
+    ceiling under these conditions. KEPT UP compares final lag against one second of measured
+    throughput, so it means the same thing in every row regardless of the rate requested.
+
+    ACTIONS/s is MODELED, not measured: throughput multiplied by the per-message cost. Every
     pattern pays 1 Action for the workflow start; Pattern 2 additionally pays 3 per poll cycle, so
     its per-message cost is 1 + 3/batch — 4 at one record per poll, 1.06 at fifty. Actions consumed
     inside the target workflow are excluded, being identical across all three. Compare against your
@@ -411,9 +445,11 @@ cat <<'EOF'
       validates the reference architecture's published 3-Actions-per-message figure. Raising it
       changes that row and the doc must be updated to match.
 
-    * Run-to-run variance at saturation is large — repeat runs of one identical configuration have
-      differed by ~40% on this hardware. Treat any difference under about 2x as noise unless you
-      have repeated the run. Differences of 10x or more (see Pattern 2 at batch-size 1) are real.
+    * Run-to-run variance at saturation is large. Two runs of one identical Pattern 3 configuration
+      at 150/s differed by 1.95x on this hardware. Below saturation it is far tighter: six runs at
+      100/s spanned 1.11x for Pattern 1 and 1.07x for Pattern 3. Treat any difference under about 2x
+      at saturation as noise unless you have repeated the run. Differences of 10x or more (see
+      Pattern 2 at batch-size 1) are real.
 
     * Tuning knobs that move these numbers, none of which are exercised here (PRD section 12):
       namespace Actions/s and per-task-queue rate limits; worker MaxConcurrentWorkflowTaskPollers,

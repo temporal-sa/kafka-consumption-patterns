@@ -16,7 +16,7 @@ import org.springframework.stereotype.Component;
 /**
  * Publishes events, applying the duplicate and malformed injection rates.
  *
- * <p>Those two knobs exist to prove consumer behaviour rather than to be realistic: duplicates
+ * <p>Those two knobs exist to prove consumer behavior rather than to be realistic: duplicates
  * demonstrate that deterministic workflow IDs make redelivery harmless, and malformed records
  * demonstrate that a poison message is routed to the DLT instead of stalling its partition.
  */
