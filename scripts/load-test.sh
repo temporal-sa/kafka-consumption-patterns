@@ -8,7 +8,7 @@
 #
 #   * sustained throughput, and whether the consumer kept up (lag flat vs growing)
 #   * p50 / p95 / p99 latency from event timestamp to workflow start
-#   * modelled consumption Actions/sec, against the namespace's Actions/sec limit
+#   * modeled consumption Actions/sec, against the namespace's Actions/sec limit
 #   * RESOURCE_EXHAUSTED rate observed by the SDK
 #   * worker CPU and heap while the case ran
 #   * for Pattern 2: event-history growth and continue-as-new count
@@ -271,7 +271,7 @@ run_case() {
 
   info "throughput ${throughput} msg/s  |  starts ${started_rate}/s  |  lag ${lag_last}  |  kept up: ${kept_up}"
   info "latency p50/p95/p99: ${p50}s / ${p95}s / ${p99}s"
-  info "modelled consumption Actions/s: ${actions}  |  RESOURCE_EXHAUSTED: ${exhausted_delta}"
+  info "modeled consumption Actions/s: ${actions}  |  RESOURCE_EXHAUSTED: ${exhausted_delta}"
   [ "$pattern" = "wf" ] && info "history length ${history}, continuations ${continuations}"
 
   local batch_col="-"
@@ -315,7 +315,7 @@ HOLDS_LOCK=1
 check_common_prereqs
 terminate_orphans "kafka-consumer"
 
-# Chaos off: downstream failure injection would confound throughput with retry behaviour.
+# Chaos off: downstream failure injection would confound throughput with retry behavior.
 if curl -sf -X POST "$WORKER_URL/chaos/reset" -o /dev/null 2>/dev/null; then
   info "Downstream failure injection reset to zero"
 else
@@ -339,7 +339,7 @@ info "Cases:      $total_cases  (~${est_min} min)"
 info "CSV:        $OUT"
 
 mkdir -p "$(dirname "$OUT")"
-printf 'pattern,rate,scale,throughput_msg_s,kept_up,final_lag,p50_s,p95_s,p99_s,actions_s_modelled,resource_exhausted,worker_cpu_pct,worker_heap_bytes,history_length,continuations,batch_size\n' > "$OUT"
+printf 'pattern,rate,scale,throughput_msg_s,kept_up,final_lag,p50_s,p95_s,p99_s,actions_s_modeled,resource_exhausted,worker_cpu_pct,worker_heap_bytes,history_length,continuations,batch_size\n' > "$OUT"
 
 for scale in "${SCALE_LIST[@]}"; do
   for rate in "${RATE_LIST[@]}"; do
@@ -376,7 +376,7 @@ cat <<EOF
     is comfortably within capacity. The first rate where KEPT UP flips to NO is that pattern's
     ceiling under these conditions.
 
-    ACTIONS/s is MODELLED, not measured: throughput multiplied by the per-message cost. Every
+    ACTIONS/s is MODELED, not measured: throughput multiplied by the per-message cost. Every
     pattern pays 1 Action for the workflow start; Pattern 2 additionally pays 3 per poll cycle, so
     its per-message cost is 1 + 3/batch — 4 at one record per poll, 1.06 at fifty. Actions consumed
     inside the target workflow are excluded, being identical across all three. Compare against your

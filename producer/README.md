@@ -65,7 +65,7 @@ producer with the same prefix and seed, and every event is a redelivery of the p
 
 ## Why the two injection knobs exist
 
-They are there to prove consumer behaviour, not for realism.
+They are there to prove consumer behavior, not for realism.
 
 **Duplicates** exercise the idempotency path. Every consumer derives a deterministic workflow ID
 from the `orderId` and starts with `WorkflowIdConflictPolicy.USE_EXISTING`, so a redelivered message

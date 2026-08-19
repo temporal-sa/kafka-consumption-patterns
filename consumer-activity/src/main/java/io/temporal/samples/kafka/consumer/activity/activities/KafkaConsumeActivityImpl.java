@@ -100,14 +100,14 @@ public class KafkaConsumeActivityImpl implements KafkaConsumeActivity {
         // do not hand-roll your own throttling on top.
         heartbeat(settings, processed, batch.offsets());
       }
-    } catch (ActivityCompletionException cancelled) {
-      // Thrown by heartbeat() when the workflow is cancelled or the activity is no longer
+    } catch (ActivityCompletionException canceled) {
+      // Thrown by heartbeat() when the workflow is canceled or the activity is no longer
       // considered current. The only clean way out of an infinite loop.
       log.info(
-          "Consumer activity {} cancelled after {} messages — closing consumer",
+          "Consumer activity {} canceled after {} messages — closing consumer",
           settings.instanceId(),
           processed);
-      throw cancelled;
+      throw canceled;
     }
   }
 

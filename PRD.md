@@ -410,7 +410,7 @@ And it should close by pointing past consumption: the target workflows started b
 - [ ] Per-module README with run instructions and the specific gotchas of that pattern
 - [ ] `application-cloud.yml` templates (Temporal Cloud API key + mTLS; Kafka SASL_SSL)
 - [ ] Tests: workflow unit tests + Testcontainers integration tests per consumer
-- [x] `scripts/load-test.sh`: matrix across patterns × rates × scale, recording throughput, kept-up, p50/p95/p99 latency, modelled Actions/s, RESOURCE_EXHAUSTED, worker CPU/heap, and Pattern 2 history growth. CSV output. Shared helpers in `scripts/lib/common.sh`.
+- [x] `scripts/load-test.sh`: matrix across patterns × rates × scale, recording throughput, kept-up, p50/p95/p99 latency, modeled Actions/s, RESOURCE_EXHAUSTED, worker CPU/heap, and Pattern 2 history growth. CSV output. Shared helpers in `scripts/lib/common.sh`.
 
 ---
 
@@ -458,9 +458,9 @@ There is a plausible mechanism worth *testing* rather than asserting: Pattern 1 
 
 **Finding 3 — scale-out is sub-linear and mostly buys latency.** At 150/s offered, tripling consumers took Pattern 1 from 60.7 to 129.5 msg/s (2.13×) and Pattern 3 from 70.9 to 148.9 (2.10×). The throughput gain is real but well short of 3×; the latency gain is the larger effect — Pattern 3's p50 fell from 14.5s to 0.84s, Pattern 1's from 22.3s to 5.0s. Combined with §7.4's partition ceiling, the practical guidance is: scale out to reduce latency and to reach the partition count, not in the expectation of linear throughput.
 
-**Finding 3a — the source doc's cost row is not comparable across columns.** Working through one poll cycle at batch size N, the Workflow pattern schedules three activities and starts N workflows: 3 + N Actions for N messages, or 1 + 3/N per message. The published figure of 3 per message counts the three activity schedules but omits the workflow start — which is exactly what the External Client column's "1 action per message" *is*. Corrected, the Workflow pattern costs **4 Actions per message unbatched and 1.06 batched at 50**, against 1 for the other two. "Most Expensive" is therefore true only in the configuration nobody should run. The load-test harness had inherited the same inconsistency (modelling Pattern 2 as 3/batch rather than 1 + 3/batch) and has been corrected.
+**Finding 3a — the source doc's cost row is not comparable across columns.** Working through one poll cycle at batch size N, the Workflow pattern schedules three activities and starts N workflows: 3 + N Actions for N messages, or 1 + 3/N per message. The published figure of 3 per message counts the three activity schedules but omits the workflow start — which is exactly what the External Client column's "1 action per message" *is*. Corrected, the Workflow pattern costs **4 Actions per message unbatched and 1.06 batched at 50**, against 1 for the other two. "Most Expensive" is therefore true only in the configuration nobody should run. The load-test harness had inherited the same inconsistency (modeling Pattern 2 as 3/batch rather than 1 + 3/batch) and has been corrected.
 
-**Finding 4 — the ceiling under load is the worker, not the consumers.** Worker CPU stayed under 4% while patterns 1 and 3 both stalled, and no rate limiting occurred, so the binding constraint on this hardware is round-trip latency through the local Temporal service rather than any consumer-side capacity. This reinforces §7.4: consumption is rarely the part worth optimising.
+**Finding 4 — the ceiling under load is the worker, not the consumers.** Worker CPU stayed under 4% while patterns 1 and 3 both stalled, and no rate limiting occurred, so the binding constraint on this hardware is round-trip latency through the local Temporal service rather than any consumer-side capacity. This reinforces §7.4: consumption is rarely the part worth optimizing.
 
 ---
 

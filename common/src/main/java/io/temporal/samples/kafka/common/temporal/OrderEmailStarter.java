@@ -73,7 +73,7 @@ public class OrderEmailStarter {
   }
 
   /**
-   * Starts the workflow, or recognises that this event was already handled.
+   * Starts the workflow, or recognizes that this event was already handled.
    *
    * <p>Returns only after Temporal has durably accepted the start. Callers must not commit the Kafka
    * offset until this returns normally — that ordering is what turns at-least-once delivery into

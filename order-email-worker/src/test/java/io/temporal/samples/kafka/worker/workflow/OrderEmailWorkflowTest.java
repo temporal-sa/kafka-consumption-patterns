@@ -75,7 +75,7 @@ class OrderEmailWorkflowTest {
         Instant.parse("2026-08-12T15:00:00Z"));
   }
 
-  /** Fails {@code emailFailures} times before succeeding, so retry behaviour is observable. */
+  /** Fails {@code emailFailures} times before succeeding, so retry behavior is observable. */
   private static final class StubActivities implements OrderEmailActivities {
 
     private final int emailFailures;
