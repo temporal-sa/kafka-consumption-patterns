@@ -189,3 +189,115 @@ per-message record.
 Accept heartbeat configuration and worker slot headroom as the price. If you need per-message
 history, that is Pattern 2. If you would rather operate consumers with the deployment tooling you
 already have, that is Pattern 1.
+
+## Pattern 3b — the same activity, without the workflow
+
+Not implemented in this repo. Read this section, then decide whether to reach for it.
+
+Notice what `KafkaConsumerActivityWorkflowImpl` actually does: a `for` loop and
+`Promise.allOf(...).get()`. It orchestrates nothing. It exists because, until recently, an activity
+had to hang off a workflow. [Standalone
+Activities](https://docs.temporal.io/standalone-activity) remove that requirement — an activity
+becomes a top-level execution started straight from a client, with the same durability, retries,
+heartbeats, and cancellation.
+
+The activity body needs **zero changes**. `KafkaConsumeActivityImpl` touches Temporal in exactly two
+places — `Activity.getExecutionContext().getInfo().getAttempt()` and `.heartbeat(...)` — and both are
+valid standalone. Only the launch path differs, so `ConsumerBootstrap` absorbs the whole change:
+
+```java
+ActivityClient activities =
+    ActivityClient.newInstance(
+        service, ActivityClientOptions.newBuilder().setNamespace(namespace).build());
+
+for (int i = 0; i < parallelConsumers; i++) {
+  activities.start(
+      KafkaConsumeActivity.class,
+      KafkaConsumeActivity::consume,
+      StartActivityOptions.newBuilder()
+          .setId("kafka-consumer-" + settings.groupId() + "-" + i)   // one ID per consumer
+          .setTaskQueue(TASK_QUEUE)
+          .setStartToCloseTimeout(Duration.ofDays(365))
+          .setHeartbeatTimeout(Duration.ofSeconds(30))
+          .setRetryOptions(RetryOptions.newBuilder().setMaximumAttempts(0).build())
+          // Replaces catching WorkflowExecutionAlreadyStarted: restarting the app reattaches
+          // to the running consumer instead of erroring.
+          .setIdConflictPolicy(ActivityIdConflictPolicy.ACTIVITY_ID_CONFLICT_POLICY_USE_EXISTING)
+          .build(),
+      perConsumer(i));
+}
+```
+
+`KafkaConsumerActivityWorkflow` and its `Impl` delete entirely. The `@ActivityImpl(taskQueues = ...)`
+registration and the worker capacity configuration stay exactly as they are.
+
+### What you gain
+
+**Each consumer becomes individually addressable.** This is the real prize, and it lands directly on
+the footgun documented above. Today the fleet is one workflow: you cannot add a consumer, drop one,
+or change one's settings without terminating all N. With an activity ID per consumer, startup becomes
+a reconciliation — list what is running for this group, start what is missing, terminate the extras —
+which fixes the run-1/run-2/run-3 ghost accumulation at the root instead of sweeping up after it.
+
+**Idempotent start moves into the platform.** `USE_EXISTING` is the conflict policy version of the
+`catch (WorkflowExecutionAlreadyStarted)` reattach, and it applies per consumer rather than per fleet.
+
+**A better visibility surface for this shape.** Consumers are top-level executions in their own ID
+space, so you query them directly instead of listing workflows and describing each one:
+
+```bash
+temporal activity list --query "ActivityType = 'Consume' AND Status = 'Running'"
+temporal activity describe  --activity-id kafka-consumer-temporal-activity-consumer-0
+temporal activity terminate --activity-id kafka-consumer-temporal-activity-consumer-0 --reason "done"
+```
+
+**One less concept to explain.** "The workflow is deliberately trivial — it exists only to own the
+activities' lifecycle" is a paragraph readers of a reference implementation reasonably stop and
+question. It goes away.
+
+### What you give up
+
+**Public Preview, and the version floor is real.** Requires Temporal Server 1.31+ and Java SDK
+1.35.0+; this repo pins `temporal.version` at `1.31.0`, so it is an SDK bump, not just new code.
+`ActivityClient`, `StartActivityOptions`, and `ActivityHandle` are `@Experimental`. `temporal server
+start-dev` enables the feature by default, but a self-hosted cluster needs the
+`activity.enableStandalone` dynamic config flag, which ships **disabled**.
+
+**Pause is not available.** Pause, reset, and update options are deferred to GA. Pausing consumption
+— stop polling, hold offsets, resume — is exactly what you want during a downstream outage, and today
+you can at least model it as a signal on the workflow. `TerminateExisting` is also unsupported, so
+"restart this consumer with new settings" is terminate-then-start rather than one atomic call.
+
+**You lose the group handle.** One workflow ID is currently *the* handle for the entire fleet: one
+terminate stops everything, and once the workflow starts, Temporal guarantees all N activities get
+scheduled. Standalone means the client issues N starts, and partial failure — three of five started,
+then the pod dies — becomes your bootstrap code's problem to reconcile.
+
+**There is nowhere left to put coordination.** Rescaling on a signal, staggered starts, reacting when
+one consumer fails terminally, rotating topics: all of it has an obvious home in the workflow today.
+Without one, that logic moves into the launching application — which is the "one more thing to
+operate" that this pattern exists to avoid.
+
+**Spring Boot integration is uncharted.** The starter has no `ActivityClient` autoconfiguration, and
+the worker in this module exists as a side effect of `@WorkflowImpl`. Check `TestWorkflowEnvironment`
+support for standalone starts before rewriting `ConsumerActivityContextTest`.
+
+### ⚠️ What does not change
+
+Readers assume these improve. They do not:
+
+- **The execution slot trap is identical.** Standalone activities occupy the same worker activity
+  slots. `max-concurrent-activity-executors` headroom is still mandatory.
+- **Killing the process still does not stop the consumer.** The execution is durable server-side
+  either way. Only the command changes — `temporal activity terminate` instead of `workflow terminate`.
+- **Cost and per-message visibility.** Still 1 Action per message plus throttled heartbeats. Dropping
+  the workflow saves one start and a couple of workflow tasks for the life of the consumer, which
+  rounds to zero. Still nothing per-message in history; that is still Pattern 2.
+- **Kafka's committed offsets remain the source of truth for recovery.**
+
+### Recommendation
+
+Do not migrate Pattern 3 yet. This repo's value is that all three patterns run out of the box, and
+a Public Preview dependency with no pause support is not worth that. Revisit when Standalone
+Activities reach GA — the argument for promoting 3b to the default is strong, and because the
+activity code carries over unchanged, the migration stays confined to `ConsumerBootstrap`.
